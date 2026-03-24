@@ -1,5 +1,6 @@
 use libc::*;
-use std::{mem};
+use std::mem;
+use io_uring::IoUring;
 
 fn main() {
     unsafe {
@@ -42,7 +43,18 @@ fn main() {
         if listen(fd, 128) < 0 {
             panic!("Listen Failed");
         }
-        println!("Listening on 0.0.0.0:6370 (fd = {})", fd);
+        println!("Listening on 0.0.0.0:6379 (fd = {})", fd);
+
+        // ring with queue depth 256, must pe power of two
+        // this means that SQ can hold 256 in flight submition at once
+        // CQ will be automtically SQx2 = 512
+
+        let mut ring: IoUring = IoUring::builder()
+            .build(256)
+            .expect("io_uring setup failed");
+
+        println!("io_uring created (sq_depth=256, cq_depth={})", ring.params().cq_entries());
+        let _ = ring;
 
     }
 }
