@@ -1,5 +1,5 @@
 use libc::*;
-use std::{mem, net::Ipv4Addr};
+use std::{mem};
 
 fn main() {
     unsafe {
@@ -15,8 +15,8 @@ fn main() {
         if setsockopt(
             fd, 
             SOL_SOCKET, 
-            SO_REUSEADDR, 
-            &optval as *const _ as *const _ , 
+            SO_REUSEADDR, // allow bind even if port is in TIME_WAIT state
+            &optval as *const _ as *const _, 
             mem::size_of_val(&optval) as u32
         ) < 0 {
             panic!()
@@ -24,10 +24,9 @@ fn main() {
 
         // Bind to 0.0.0.0:6379:  https://man7.org/linux/man-pages/man3/sockaddr.3type.html
         let addr = sockaddr_in {
-            sin_len: 32,
-            sin_family: AF_INET as u8,
+            sin_family: AF_INET as u16,
             sin_port: htons(6379),
-            sin_addr: in_addr { s_addr: u32::from_ne_bytes(Ipv4Addr::new(0, 0, 0, 0).octets()).to_be() },
+            sin_addr: in_addr { s_addr: INADDR_ANY }, // INADDR_ANY is 0u32, already network byte order
             sin_zero: [0; 8],
         };
 
