@@ -1,6 +1,6 @@
 use libc::*;
 use std::mem;
-use io_uring::IoUring;
+use io_uring::{opcode, types, IoUring};
 
 /*
 This is Op tagging, meaning we need to encode the metadata about the asyc operation into
@@ -120,6 +120,22 @@ fn main() {
 
         println!("io_uring created (sq_depth=256, cq_depth={})", ring_fd.params().cq_entries());
         let _ = ring_fd;
+
+        // Submit one Multishot accept SQE
+        let accept_ud = pack_user_data(OpKind::Accept, 0, 0);
+        let accept_sqe = opcode::AcceptMulti::new(types::Fd(fd))
+            .flags(SOCK_NONBLOCK | SOCK_CLOEXEC)
+            .build()
+            .user_data(accept_ud);
+
+        {
+            let mut sq = ring_fd.submission();
+            sq.push(&accept_sqe).expect("SQ is full");
+        }
+
+        ring_fd.submit().expect("Submit multishot accept failed");
+        println!("Mutlishot accept armed");
+
 
     }
 }
