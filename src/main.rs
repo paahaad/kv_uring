@@ -1,6 +1,6 @@
 use libc::*;
-use std::mem;
-use io_uring::{opcode, types, IoUring};
+use std::{io, mem};
+use io_uring::{IoUring, cqueue, opcode, types};
 
 /*
 This is Op tagging, meaning we need to encode the metadata about the asyc operation into
@@ -67,6 +67,48 @@ pub fn unpack_user_data(v: u64) -> (OpKind, u16, u16) {
     (op, conn_id,  buf_id)
 } 
 
+fn arm_multishot_accept(ring: &mut IoUring, listen_fd: i32) {
+    let accept_ud = pack_user_data(OpKind::Accept, 0, 0);
+    let accept_sqe = opcode::AcceptMulti::new(types::Fd(listen_fd))
+        .flags(SOCK_NONBLOCK | SOCK_CLOEXEC)
+        .build()
+        .user_data(accept_ud);
+
+    {
+        let mut sq = ring.submission();
+        unsafe {
+            sq.push(&accept_sqe).expect("SQ is full");
+        }
+    }
+    ring.submit().expect("Submit multishot accept failed");
+
+}
+
+
+fn handle_accept_cqe(ring: &mut IoUring, listen_fd: i32, res: i32, flags: u32) {
+    
+    let is_more = cqueue::more(flags);
+
+    if res >= 0 {
+        let client_fd = res;
+        println!("Accept event: client_fd={client_fd}, more={is_more}");
+
+        let rc = unsafe { libc::close(client_fd) };
+        if rc < 0 {
+            println!("Close client fd failed {}", io::Error::last_os_error());
+        }
+    }else {
+        let errno = -res;
+        println!("Accept Completion Error {}", errno);
+    }
+
+    if res < 0 || !is_more {
+        println!("re-arming mutlishot accept");
+        arm_multishot_accept(ring, listen_fd);
+    }
+
+}
+
 fn main() {
     unsafe {
 
@@ -119,22 +161,36 @@ fn main() {
             .expect("io_uring setup failed");
 
         println!("io_uring created (sq_depth=256, cq_depth={})", ring_fd.params().cq_entries());
-        let _ = ring_fd;
 
         // Submit one Multishot accept SQE
-        let accept_ud = pack_user_data(OpKind::Accept, 0, 0);
-        let accept_sqe = opcode::AcceptMulti::new(types::Fd(fd))
-            .flags(SOCK_NONBLOCK | SOCK_CLOEXEC)
-            .build()
-            .user_data(accept_ud);
+        arm_multishot_accept(&mut ring_fd, fd);
 
-        {
-            let mut sq = ring_fd.submission();
-            sq.push(&accept_sqe).expect("SQ is full");
+        loop {
+            ring_fd.submit_and_wait(1).expect("Submit_and_wait Failed");
+
+            let mut queue: Vec<(u64, i32, u32)>= Vec::new();
+
+            // ring_fd.completions() is borrowed mutable here thus scope {} ;
+            {
+                let cq =  ring_fd.completion();
+                for cqe in cq {
+                    queue.push((cqe.user_data(), cqe.result(), cqe.flags()));
+                }
+            }
+
+            for (user_data, res, flags) in queue {
+                let (op, conn_id, buf_id) = unpack_user_data(user_data);
+
+                match op {
+                    OpKind::Accept => handle_accept_cqe(&mut ring_fd, fd, res, flags),
+                    _ => {
+                        println!("Not supported Op Kind");
+                    }
+                }
+
+            }
         }
 
-        ring_fd.submit().expect("Submit multishot accept failed");
-        println!("Mutlishot accept armed");
 
 
     }
