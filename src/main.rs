@@ -1,5 +1,7 @@
 use io_uring::IoUring;
 
+use crate::net::conn_table::ConnectionTable;
+
 pub mod engine;
 pub mod error;
 pub mod io_uring_runtime;
@@ -22,4 +24,6 @@ fn main() {
     println!("io_uring created (sq_depth=256, cq_depth={})", ring_fd.params().cq_entries());
 
     server::run_event_loop(&mut ring_fd, fd);
+
+
 }

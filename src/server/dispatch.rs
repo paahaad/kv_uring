@@ -1,22 +1,24 @@
-use std::io;
-
 use io_uring::{IoUring, cqueue};
 
-use crate::{net::connection::Connection, server::submit::arm_multishot_accept};
+use crate::net::{
+    conn_table::ConnectionTable,
+    connection::Connection
+};
+use crate::server::submit::arm_multishot_accept;
 
-pub fn handle_accept_cqe(ring: &mut IoUring, listen_fd: i32, res: i32, flags: u32) {
+
+pub fn handle_accept_cqe(ring: &mut IoUring, listen_fd: i32, res: i32, flags: u32, conn_table: &mut ConnectionTable) {
     
     let is_more = cqueue::more(flags);
 
     if res >= 0 {
         let client_fd = res;
-        println!("Accept event: client_fd={client_fd}, more={is_more}");
-        let _conn = Connection::new(client_fd);
+        let conn: Connection = Connection::new(client_fd);
+        let conn_id = conn_table.insert(conn);
+        println!("Accepted: fd={}, conn_id={}", client_fd, conn_id);
 
-        let rc = unsafe { libc::close(client_fd) };
-        if rc < 0 {
-            println!("Close client fd failed {}", io::Error::last_os_error());
-        }
+        println!("Connection Table: {:#?}", conn_table);
+        
     }else {
         let errno = -res;
         println!("Accept Completion Error {}", errno);
